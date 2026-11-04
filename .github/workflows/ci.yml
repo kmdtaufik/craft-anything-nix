@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Nix with Flakes
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v15
+
+      - name: Verify Flake evaluation and checks
+        run: |
+          nix flake show
+          nix flake check
+
+      - name: Build Patched Binary Release (craft-anything-bin)
+        run: |
+          nix build .#craft-anything-bin --print-build-logs
+
+      - name: Verify Binary Integrity and Dynamic Libraries
+        run: |
+          echo "==> Verifying binary presence:"
+          test -x ./result/bin/craft-anything
+          test -x ./result/bin/craft-anything-cli
+
+          echo "==> Verifying CLI doctor output:"
+          ./result/bin/craft-anything-cli doctor || true
+
+          echo "==> Verifying ELF dynamic library linkage (zero missing libraries):"
+          ldd ./result/bin/craft-anything
+          ! ldd ./result/bin/craft-anything | grep -i "not found"
