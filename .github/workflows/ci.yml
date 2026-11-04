@@ -5,7 +5,16 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Runs every 3 days at midnight UTC
+    - cron: '0 0 */3 * *'
   workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build from source even if package has not changed'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   check-and-build:
@@ -13,6 +22,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Install Nix with Flakes
         uses: cachix/install-nix-action@v31
@@ -21,19 +32,72 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
 
-      - name: Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v15
-
       - name: Verify Flake evaluation and checks
         run: |
           nix flake show
           nix flake check
 
-      - name: Build Patched Binary Release (craft-anything-bin)
+      - name: Check if packages are updated
+        id: check-update
         run: |
-          nix build .#craft-anything-bin --print-build-logs
+          UPDATED=false
+          CURRENT_VER=$(grep -E 'version = "[^"]+"' pkgs/common.nix | head -n1 | sed -E 's/.*version = "([^"]+)".*/\1/')
+          echo "Current package version in repository: $CURRENT_VER"
+
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "Checking upstream GitHub releases for new version..."
+            LATEST_TAG=$(curl -sSL "https://api.github.com/repos/storytold/craft-anything/releases/latest" | jq -r .tag_name)
+            LATEST_VER="${LATEST_TAG#v}"
+            echo "Upstream latest release version: $LATEST_VER"
+            if [ -n "$LATEST_VER" ] && [ "$LATEST_VER" != "null" ] && [ "$LATEST_VER" != "$CURRENT_VER" ]; then
+              echo "==> New upstream version detected ($CURRENT_VER -> $LATEST_VER)!"
+              UPDATED=true
+            else
+              echo "==> Package is already up to date with upstream ($CURRENT_VER)."
+            fi
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Checking files changed in pull request against ${{ github.base_ref }}..."
+            CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- pkgs/ flake.nix flake.lock 2>/dev/null || git diff --name-only HEAD~1 HEAD -- pkgs/ flake.nix flake.lock)
+            if [ -n "$CHANGED" ]; then
+              echo "==> Package files changed in PR:"
+              echo "$CHANGED"
+              UPDATED=true
+            else
+              echo "==> No package files modified in this pull request."
+            fi
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "Checking files changed in push commit..."
+            if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              CHANGED=$(git diff --name-only HEAD~1 HEAD -- pkgs/ flake.nix flake.lock)
+            else
+              CHANGED="initial"
+            fi
+            if [ -n "$CHANGED" ]; then
+              echo "==> Package files changed in push:"
+              echo "$CHANGED"
+              UPDATED=true
+            else
+              echo "==> No package files modified in this push."
+            fi
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.force_build }}" = "true" ]; then
+              echo "==> Manual workflow dispatch requested with force_build=true."
+              UPDATED=true
+            else
+              echo "==> Manual workflow dispatch requested without force_build."
+            fi
+          fi
+
+          echo "updated=$UPDATED" >> "$GITHUB_OUTPUT"
+
+      - name: Build From Source (craft-anything-src)
+        if: steps.check-update.outputs.updated == 'true'
+        run: |
+          echo "==> Building craft-anything-src from source..."
+          nix build .#craft-anything-src --print-build-logs
 
       - name: Verify Binary Integrity and Dynamic Libraries
+        if: steps.check-update.outputs.updated == 'true'
         run: |
           echo "==> Verifying binary presence:"
           test -x ./result/bin/craft-anything
@@ -47,3 +111,8 @@ jobs:
           ! ldd ./result/bin/.craft-anything-wrapped | grep -i "not found"
           ldd ./result/bin/.craft-anything-cli-wrapped
           ! ldd ./result/bin/.craft-anything-cli-wrapped | grep -i "not found"
+
+      - name: Report Status When Unchanged
+        if: steps.check-update.outputs.updated != 'true'
+        run: |
+          echo "==> Package files are unchanged from current version. Source build skipped."
