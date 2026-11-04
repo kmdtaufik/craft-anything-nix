@@ -43,5 +43,7 @@ jobs:
           ./result/bin/craft-anything-cli doctor || true
 
           echo "==> Verifying ELF dynamic library linkage (zero missing libraries):"
-          ldd ./result/bin/craft-anything
-          ! ldd ./result/bin/craft-anything | grep -i "not found"
+          ldd ./result/bin/.craft-anything-wrapped
+          ! ldd ./result/bin/.craft-anything-wrapped | grep -i "not found"
+          ldd ./result/bin/.craft-anything-cli-wrapped
+          ! ldd ./result/bin/.craft-anything-cli-wrapped | grep -i "not found"
