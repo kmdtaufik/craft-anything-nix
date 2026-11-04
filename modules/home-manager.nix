@@ -3,10 +3,22 @@
 let
   cfg = config.programs.craft-anything;
 
+  # Compatibility shim ensuring Nixpkgs' ghidra-analyzeHeadless is accessible as analyzeHeadless
+  ghidraShim = pkgs.runCommand "ghidra-analyzeheadless-shim" { } ''
+    mkdir -p $out/bin
+    for p in ${lib.concatStringsSep " " cfg.extraEngines}; do
+      if [ -f "$p/bin/ghidra-analyzeHeadless" ]; then
+        ln -s "$p/bin/ghidra-analyzeHeadless" "$out/bin/analyzeHeadless"
+      fi
+    done
+  '';
+
+  allExtraTools = cfg.extraEngines ++ [ ghidraShim ];
+
   # Base package with extra engines passed
   basePackage = if cfg.extraEngines == [ ]
     then cfg.package
-    else cfg.package.override { extraTools = cfg.extraEngines; };
+    else cfg.package.override { extraTools = allExtraTools; };
 
   # Package with CLI-only filtering if enableDesktop is disabled
   desktopFilteredPackage = if cfg.enableDesktop

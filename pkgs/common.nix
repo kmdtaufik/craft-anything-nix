@@ -49,17 +49,27 @@ rec {
 
   # Shared wrapping logic solving the dlopen trap and PATH discovery
   wrapBinaries = { extraTools ? [ ] }: ''
+    # Hook to expose analyzeHeadless when NixOS provides ghidra-analyzeHeadless
+    ghidraHook='if ! command -v analyzeHeadless >/dev/null 2>&1 && command -v ghidra-analyzeHeadless >/dev/null 2>&1; then
+      _SHIM_DIR="''${XDG_RUNTIME_DIR:-/tmp}/craft-anything-shims-$(id -u)"
+      mkdir -p "$_SHIM_DIR"
+      ln -sf "$(command -v ghidra-analyzeHeadless)" "$_SHIM_DIR/analyzeHeadless"
+      export PATH="$_SHIM_DIR:$PATH"
+    fi'
+
     # Wrap GUI with dlopen libraries and PATH for sibling CLI and sandboxing
     wrapProgram "$out/bin/craft-anything" \
       --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath dlopenLibs}" \
       --prefix PATH : "${lib.makeBinPath ([ pkgs.bubblewrap ] ++ extraTools)}" \
-      --suffix PATH : "$out/bin"
+      --suffix PATH : "$out/bin" \
+      --run "$ghidraHook"
 
     # Wrap CLI with required runtime libraries and sandboxing
     wrapProgram "$out/bin/craft-anything-cli" \
       --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath cliLibs}" \
       --prefix PATH : "${lib.makeBinPath ([ pkgs.bubblewrap ] ++ extraTools)}" \
-      --suffix PATH : "$out/bin"
+      --suffix PATH : "$out/bin" \
+      --run "$ghidraHook"
   '';
 
   meta = with lib; {
