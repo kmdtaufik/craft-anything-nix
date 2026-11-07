@@ -283,6 +283,11 @@ never start two Rust builds.
 Run it by hand from **Actions → CI → Run workflow**, optionally naming a release or
 forcing the hashes to be recomputed.
 
+The job pushes with `GITHUB_TOKEN`. If `main` is branch-protected, let
+`github-actions[bot]` bypass the rule; otherwise the push is refused and the run fails
+loudly rather than silently skipping the bump. Run `./scripts/update.sh` by hand and open a
+pull request if you would rather review the hash change first.
+
 ### Manually
 
 ```bash
