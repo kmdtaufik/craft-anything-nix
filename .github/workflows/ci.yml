@@ -3,11 +3,23 @@ name: CI
 on:
   push:
     branches: [ main ]
+    # Only what the build consumes. Documentation and other changes ride along
+    # in a pull request without paying for two Rust builds.
+    paths:
+      - '**.nix'
+      - 'flake.lock'
+      - 'versions.json'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ main ]
+    paths:
+      - '**.nix'
+      - 'flake.lock'
+      - 'versions.json'
+      - '.github/workflows/ci.yml'
   schedule:
-    # Every 3 days at 00:00 UTC: pin the newest upstream release, then build it.
-    - cron: '0 0 */3 * *'
+    # Every day at 00:00 UTC: pin the newest upstream release, then build it.
+    - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
       release:

@@ -273,10 +273,12 @@ each system. No `.nix` file carries a hash, so a bump is a data change and nothi
 
 ### Automatic (CI)
 
-Every 3 days the `update` job asks GitHub for the newest release. When it differs from
+Every day the `update` job asks GitHub for the newest release. When it differs from
 `versions.json`, the job rewrites the file, commits it to `main`, and the `build` job then
-builds **both** strategies from the new pins. Pushes and pull requests to `main` always
-build both strategies in parallel, whether or not the version changed.
+builds **both** strategies from the new pins. Pushes and pull requests to `main` build both
+strategies in parallel, whether or not the version changed — but only when they touch a
+`.nix` file, `flake.lock`, `versions.json` or this workflow. Documentation and other changes
+never start two Rust builds.
 
 Run it by hand from **Actions → CI → Run workflow**, optionally naming a release or
 forcing the hashes to be recomputed.
