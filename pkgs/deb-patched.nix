@@ -10,14 +10,12 @@
 
 let
   system = stdenv.hostPlatform.system;
-  debArch = {
-    "x86_64-linux" = "x86_64";
-    "aarch64-linux" = "aarch64";
-  }.${system} or (throw "Unsupported system for craft-anything-bin: ${system}");
+
+  # URL and hash come straight from versions.json, so a bump is a data change.
+  deb = common.debs.${system} or (throw "versions.json has no release package for ${system}");
 
   src = fetchurl {
-    url = "https://github.com/storytold/craft-anything/releases/download/v${common.version}/craft-anything-${common.version}-linux-${debArch}.deb";
-    hash = common.debHashes.${system} or (throw "Missing deb hash for architecture: ${system}");
+    inherit (deb) url hash;
   };
 in
 stdenv.mkDerivation {

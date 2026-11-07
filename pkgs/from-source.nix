@@ -1,7 +1,7 @@
 { lib
 , pkgs
 , stdenv
-, fetchFromGitHub
+, fetchzip
 , rustPlatform ? (
     if pkgs ? rust-bin then
       pkgs.makeRustPlatform {
@@ -24,11 +24,8 @@ in
 rustPlatform.buildRustPackage rec {
   inherit pname version;
 
-  src = fetchFromGitHub {
-    owner = "storytold";
-    repo = "craft-anything";
-    rev = "v${version}";
-    hash = common.srcHash;
+  src = fetchzip {
+    inherit (common.source) url hash;
   };
 
   cargoLock = {

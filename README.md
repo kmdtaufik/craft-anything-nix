@@ -256,17 +256,51 @@ This auto-detects configured AI agent apps (Claude Code, Cursor, Windsurf, VS Co
 
 ## Maintenance & Releases
 
-To update to a new upstream release:
+Every upstream pin lives in one data file, [`versions.json`](versions.json): the release
+version, the source archive URL and its SRI hash, and the release `.deb` URL and hash for
+each system. No `.nix` file carries a hash, so a bump is a data change and nothing else.
 
-```bash
-./scripts/update.sh
+```json
+{
+  "version": "0.3.0",
+  "source": { "url": "…/archive/refs/tags/v0.3.0.tar.gz", "hash": "sha256-…" },
+  "packages": {
+    "x86_64-linux": { "url": "…/craft-anything-0.3.0-linux-x86_64.deb", "hash": "sha256-…" },
+    "aarch64-linux": { "url": "…/craft-anything-0.3.0-linux-aarch64.deb", "hash": "sha256-…" }
+  }
+}
 ```
 
-The update script:
-1. Queries the GitHub Releases API for the latest release tag.
-2. Prefetches release `.deb` packages for `x86_64-linux` and `aarch64-linux`.
-3. Prefetches source git archives and computes SRI SHA-256 hashes.
-4. Updates `pkgs/common.nix` in-place.
+### Automatic (CI)
+
+Every 3 days the `update` job asks GitHub for the newest release. When it differs from
+`versions.json`, the job rewrites the file, commits it to `main`, and the `build` job then
+builds **both** strategies from the new pins. Pushes and pull requests to `main` always
+build both strategies in parallel, whether or not the version changed.
+
+Run it by hand from **Actions → CI → Run workflow**, optionally naming a release or
+forcing the hashes to be recomputed.
+
+### Manually
+
+```bash
+./scripts/update.sh                     # newest upstream release
+./scripts/update.sh 0.4.0               # a specific release
+./scripts/update.sh 0.3.0 --force       # recompute the current release's hashes
+```
+
+The script:
+1. Resolves the release tag (argument, or GitHub's latest).
+2. Prefetches the source archive and each release `.deb`, computing SRI SHA-256 hashes the
+   same way `fetchzip` and `fetchurl` verify them.
+3. Rewrites `versions.json` atomically.
+
+Then check it:
+
+```bash
+nix flake check
+nix build .#craft-anything-bin .#craft-anything-src
+```
 
 ---
 

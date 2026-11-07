@@ -1,0 +1,17 @@
+{
+  "version": "0.5.0",
+  "source": {
+    "url": "https://github.com/storytold/craft-anything/archive/refs/tags/v0.5.0.tar.gz",
+    "hash": "sha256-4SpbjOMX40TC5Vq/HDjOuNAzfW97AoZ33zHJzxBHkVQ="
+  },
+  "packages": {
+    "x86_64-linux": {
+      "url": "https://github.com/storytold/craft-anything/releases/download/v0.5.0/craft-anything-0.5.0-linux-x86_64.deb",
+      "hash": "sha256-GM10cFPmLlZxic2X6FrQdl/mvM0/9eyzOOfEUvwqeww="
+    },
+    "aarch64-linux": {
+      "url": "https://github.com/storytold/craft-anything/releases/download/v0.5.0/craft-anything-0.5.0-linux-aarch64.deb",
+      "hash": "sha256-wS6VonpdhXKTxWFzA/2vMIY+4888dhXplC6IdtGuEEA="
+    }
+  }
+}

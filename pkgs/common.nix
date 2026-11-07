@@ -1,6 +1,11 @@
 { lib, pkgs }:
 
 let
+  # Every upstream pin lives in ../versions.json: the release version, the source
+  # archive URL and its hash, and the per-system release package URLs and hashes.
+  # scripts/update.sh rewrites that file; nothing here needs editing for a bump.
+  pins = builtins.fromJSON (builtins.readFile ../versions.json);
+
   libx11' = pkgs.libx11 or pkgs.xorg.libX11;
   libxcursor' = pkgs.libxcursor or pkgs.xorg.libXcursor;
   libxi' = pkgs.libxi or pkgs.xorg.libXi;
@@ -28,16 +33,13 @@ let
 in
 rec {
   pname = "craft-anything";
-  version = "0.3.0";
+  inherit (pins) version;
 
-  # Upstream source git archive hash (for v0.3.0 tag)
-  srcHash = "sha256-wHQHqEpRW+eypP0y+rafAz8CBi/ei8lka8st5JxpqL4=";
+  # { url, hash } of the upstream source archive the from-source build unpacks.
+  source = pins.source;
 
-  # Official release .deb hashes per supported platform
-  debHashes = {
-    x86_64-linux = "sha256-sDNLYQXpNqnVq7eG/046hmGuApj001ZOCfFme9mEhw0=";
-    aarch64-linux = "sha256-lQq4JBUgmIDi1caUYrJ3TV2el65TFiZjWJMyGwSW+R0=";
-  };
+  # { <system> = { url, hash; }; } official release .deb packages, by Nix system.
+  debs = pins.packages;
 
   inherit dlopenLibs cliLibs;
 

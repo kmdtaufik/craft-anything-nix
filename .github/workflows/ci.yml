@@ -6,19 +6,103 @@ on:
   pull_request:
     branches: [ main ]
   schedule:
-    # Runs every 3 days at midnight UTC
+    # Every 3 days at 00:00 UTC: pin the newest upstream release, then build it.
     - cron: '0 0 */3 * *'
   workflow_dispatch:
     inputs:
-      force_build:
-        description: 'Force build even if on schedule without upstream changes'
+      release:
+        description: 'Upstream release to pin (empty = newest on GitHub)'
+        required: false
+        type: string
+        default: ''
+      force:
+        description: 'Recompute the pins even when the version is unchanged'
         required: false
         type: boolean
-        default: true
+        default: false
+
+permissions:
+  # The update job commits versions.json back to main.
+  contents: write
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  check-and-build:
+  update:
+    name: Update versions.json
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.bump.outputs.changed }}
+      version: ${{ steps.bump.outputs.version }}
+      commit: ${{ steps.bump.outputs.commit }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install Nix with Flakes
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Pin the release in versions.json
+        id: bump
+        env:
+          RELEASE: ${{ inputs.release }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          before="$(jq -r .version versions.json)"
+          echo "==> versions.json currently pins v${before}"
+
+          if [ -n "${RELEASE}" ] && [ "${FORCE}" = "true" ]; then
+            ./scripts/update.sh "${RELEASE}" --force
+          elif [ -n "${RELEASE}" ]; then
+            ./scripts/update.sh "${RELEASE}"
+          elif [ "${FORCE}" = "true" ]; then
+            ./scripts/update.sh --force
+          else
+            ./scripts/update.sh
+          fi
+
+          after="$(jq -r .version versions.json)"
+          echo "version=${after}" >>"$GITHUB_OUTPUT"
+
+          if git diff --quiet -- versions.json; then
+            echo "==> versions.json already pins v${after}; nothing to commit."
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+            echo "commit=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add versions.json
+          git commit -m "chore: pin craft-anything v${after} (was v${before})"
+          git push origin HEAD:main
+
+          echo "==> committed v${after}"
+          echo "changed=true" >>"$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+  build:
     name: Build ${{ matrix.package }}
+    needs: [ update ]
+    # A push or pull request always builds both strategies, whatever the version.
+    # A scheduled run builds only when the update job pinned something new.
+    if: |
+      always() && (
+        github.event_name == 'push' ||
+        github.event_name == 'pull_request' ||
+        github.event_name == 'workflow_dispatch' ||
+        needs.update.outputs.changed == 'true'
+      )
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -35,7 +119,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          # A scheduled build must see the commit the update job just pushed.
+          ref: ${{ needs.update.outputs.commit || github.sha }}
 
       - name: Install Nix with Flakes
         uses: cachix/install-nix-action@v31
@@ -44,51 +129,17 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
 
-      - name: Check trigger condition
-        id: check-run
-        run: |
-          SHOULD_RUN=true
-
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "Cron schedule triggered: checking for upstream release updates..."
-            CURRENT_VER=$(grep -E 'version = "[^"]+"' pkgs/common.nix | head -n1 | sed -E 's/.*version = "([^"]+)".*/\1/')
-            LATEST_TAG=$(curl -sSL "https://api.github.com/repos/storytold/craft-anything/releases/latest" | jq -r .tag_name)
-            LATEST_VER="${LATEST_TAG#v}"
-            echo "Current repo version: $CURRENT_VER | Upstream latest: $LATEST_VER"
-
-            if [ -n "$LATEST_VER" ] && [ "$LATEST_VER" != "null" ] && [ "$LATEST_VER" != "$CURRENT_VER" ]; then
-              echo "==> Upstream update available ($CURRENT_VER -> $LATEST_VER). Running checks."
-              SHOULD_RUN=true
-            else
-              echo "==> Package is already at upstream latest ($CURRENT_VER). Skipping scheduled build."
-              SHOULD_RUN=false
-            fi
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ github.event.inputs.force_build }}" = "false" ]; then
-              SHOULD_RUN=false
-            fi
-          else
-            # On push and pull_request: always run to ensure commits don't break the build
-            echo "==> Event '${{ github.event_name }}' detected: running full parallel validation."
-            SHOULD_RUN=true
-          fi
-
-          echo "should_run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
-
       - name: Verify Flake evaluation and checks
-        if: steps.check-run.outputs.should_run == 'true'
         run: |
           nix flake show
           nix flake check
 
       - name: Build Package (${{ matrix.package }})
-        if: steps.check-run.outputs.should_run == 'true'
         run: |
-          echo "==> Building ${{ matrix.package }}..."
+          echo "==> Building ${{ matrix.package }} from versions.json $(jq -r .version versions.json)"
           nix build .#${{ matrix.package }} --print-build-logs
 
       - name: Verify Binary Integrity and Dynamic Libraries
-        if: steps.check-run.outputs.should_run == 'true'
         run: |
           echo "==> Verifying binary presence:"
           test -x ./result/bin/craft-anything
@@ -102,8 +153,3 @@ jobs:
           ! ldd ./result/bin/.craft-anything-wrapped | grep -i "not found"
           ldd ./result/bin/.craft-anything-cli-wrapped
           ! ldd ./result/bin/.craft-anything-cli-wrapped | grep -i "not found"
-
-      - name: Report Status When Skipped
-        if: steps.check-run.outputs.should_run != 'true'
-        run: |
-          echo "==> Scheduled check skipped because package is already at upstream latest."
